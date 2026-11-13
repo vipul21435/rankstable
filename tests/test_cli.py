@@ -250,6 +250,15 @@ def test_module_entry_point():
     assert result.stdout.splitlines()[4] == "| 1 | birch | 5 |"
 
 
+def test_small_shares_keep_two_significant_digits():
+    from rankstable.cli import _percent
+
+    assert _percent(0.25) == "25.0 %"
+    assert _percent(0) == "0.0 %"
+    assert _percent(0.000123) == "0.012 %"
+    assert _percent(float("nan")) == "n/a"
+
+
 def test_format_column_shares_the_decimals_of_a_column():
     assert format_column([70.1, 62.0, None, float("nan")]) == ["70.1", "62.0", "n/a", "n/a"]
     assert format_column([3.0, 12.0]) == ["3", "12"]

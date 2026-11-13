@@ -335,7 +335,12 @@ def _run_compare(args: argparse.Namespace) -> str:
 
 
 def _percent(share: float) -> str:
-    return "n/a" if math.isnan(share) else f"{100 * share:.1f} %"
+    """A share as a percentage; one decimal, or two significant digits below 0.1 %."""
+    if math.isnan(share):
+        return "n/a"
+    if 0 < share < 0.001:
+        return f"{100 * share:.2g} %"
+    return f"{100 * share:.1f} %"
 
 
 def _positive_int_list(spec: str, option: str) -> list[int]:
