@@ -170,7 +170,7 @@ def pairwise_wins(table: ScoreTable) -> np.ndarray:
     Only benchmarks on which both models have a score count, and ties count for neither.
     """
     oriented = table.oriented()
-    wins = np.zeros((table.n_models, table.n_models), dtype=np.int64)
+    wins = np.zeros((table.n_models, table.n_models), dtype=np.int32)
     for j in range(table.n_benchmarks):
         column = oriented[:, j]
         wins += column[:, None] > column[None, :]
@@ -190,6 +190,139 @@ def copeland(table: ScoreTable) -> Ranking:
     return Ranking.from_values("copeland", table.models, score)
 
 
+#: Largest number of models for which Kemeny-Young is solved exactly.
+KEMENY_EXACT_LIMIT = 12
+
+
+def kemeny_score(wins: np.ndarray, order: list[int] | np.ndarray) -> int:
+    """Pairwise agreement of an order: ``wins[i, k]`` summed over each ``i`` placed before ``k``."""
+    placed = np.asarray(order, dtype=np.int64)
+    return int(np.triu(np.asarray(wins)[np.ix_(placed, placed)], k=1).sum())
+
+
+def _kemeny_exact(wins: np.ndarray) -> list[int]:
+    """The best order by dynamic programming over subsets, in O(2^n n) steps.
+
+    ``best[S]`` is the largest agreement any order of the subset ``S`` can reach; the model
+    placed first in ``S`` collects its wins over the rest of ``S``. Among equally good orders
+    the one that puts lower indices first is returned.
+    """
+    n = wins.shape[0]
+    size = 1 << n
+    member = (np.arange(size)[:, None] >> np.arange(n)) & 1
+    ahead = (member @ wins.T.astype(np.int64)).tolist()
+    best = [0] * size
+    for subset in range(1, size):
+        best[subset] = max(
+            best[subset ^ (1 << i)] + ahead[subset ^ (1 << i)][i]
+            for i in range(n)
+            if subset >> i & 1
+        )
+    order = []
+    subset = size - 1
+    while subset:
+        for i in range(n):
+            rest = subset ^ (1 << i)
+            if subset >> i & 1 and best[rest] + ahead[rest][i] == best[subset]:
+                order.append(i)
+                subset = rest
+                break
+    return order
+
+
+def _kemeny_local_search(wins: np.ndarray, max_sweeps: int = 100) -> list[int]:
+    """A heuristic order: start from the total number of wins, then move single models.
+
+    Each sweep takes every model in turn and moves it to the position that raises the pairwise
+    agreement most, until a sweep moves nobody or ``max_sweeps`` is reached. The result cannot
+    be improved by moving one model, but it is not guaranteed to be the best order.
+    """
+    n = wins.shape[0]
+    margin = wins.astype(np.int64) - wins.T
+    order = sorted(range(n), key=lambda i: (-int(wins[i].sum()), i))
+    for _ in range(max_sweeps):
+        moved = False
+        for model in list(order):
+            position = order.index(model)
+            ahead_of = margin[model, order]
+            # gain[q]: change in agreement when the model is taken out and put back at slot q
+            before = np.concatenate((np.cumsum(ahead_of[:position][::-1])[::-1], [0]))
+            after = -np.cumsum(ahead_of[position + 1 :])
+            gain = np.concatenate((before, after))
+            target = int(np.argmax(gain))
+            if gain[target] > 0:
+                order.pop(position)
+                order.insert(target, model)
+                moved = True
+        if not moved:
+            break
+    return order
+
+
+def kemeny_young(table: ScoreTable, *, exact_limit: int = KEMENY_EXACT_LIMIT) -> Ranking:
+    """Kemeny-Young: the order that agrees with the benchmarks on the most pairs.
+
+    An order scores ``wins[i, k]`` (see :func:`pairwise_wins`) for every pair it puts in the
+    order ``i`` before ``k``. With at most ``exact_limit`` models the best order is found
+    exactly; above that a local search is used and the result is only a heuristic. The value
+    of a model is its position in that order, so lower is better and there are no ties. When
+    several orders are equally good, the one that is first alphabetically is reported.
+    """
+    scored = [i for i in np.argsort(np.array(table.models, dtype=object), kind="stable")]
+    scored = [int(i) for i in scored if not np.isnan(table.scores[i]).all()]
+    wins = pairwise_wins(table)[np.ix_(scored, scored)]
+    order = _kemeny_exact(wins) if len(scored) <= exact_limit else _kemeny_local_search(wins)
+    position = np.full(table.n_models, np.nan)
+    for place, index in enumerate(order, start=1):
+        position[scored[index]] = place
+    return Ranking.from_values("kemeny", table.models, position, higher_is_better=False)
+
+
+def bradley_terry(
+    table: ScoreTable, *, prior: float = 0.5, max_iter: int = 2000, tol: float = 1e-10
+) -> Ranking:
+    """Bradley-Terry strengths fitted to the pairwise wins; the value is the log-strength.
+
+    Every benchmark is a round of contests between the models scored on it: a better score is
+    a win and a tie is half a win for each side. The model says ``i`` beats ``k`` with
+    probability ``p_i / (p_i + p_k)``, and the strengths are fitted by the
+    minorisation-maximisation update ``p_i <- W_i / sum_k N_ik / (p_i + p_k)``, with ``W_i``
+    the wins of ``i`` and ``N_ik`` the contests between ``i`` and ``k``.
+
+    ``prior`` adds that many wins and as many losses against a virtual opponent of strength 1,
+    which keeps the strengths finite when a model wins or loses everything. With ``prior=0``
+    the plain maximum-likelihood fit is attempted and the log-strengths are centred on zero.
+    """
+    if prior < 0:
+        raise ValueError("prior cannot be negative")
+    wins, _ = _benchmark_wins(table)
+    present = ~np.isnan(wins)
+    scored = np.flatnonzero(present.any(axis=1))
+    total = np.where(present, wins, 0.0).sum(axis=1)[scored] + prior
+    membership = present[scored].astype(np.float64)
+    contests = membership @ membership.T
+    np.fill_diagonal(contests, 0.0)
+    strength = np.ones(scored.size)
+    for _ in range(max_iter):
+        with np.errstate(divide="ignore", invalid="ignore"):
+            load = (contests / (strength[:, None] + strength[None, :])).sum(axis=1)
+            updated = total / (load + 2 * prior / (strength + 1))
+        updated = np.where(np.isfinite(updated), updated, strength)
+        if prior == 0:
+            positive = updated > 0
+            if positive.any():
+                updated = updated / np.exp(np.log(updated[positive]).mean())
+        with np.errstate(divide="ignore", invalid="ignore"):
+            shift = np.abs(np.log(updated) - np.log(strength))
+        strength = updated
+        if not np.nanmax(shift, initial=0.0) > tol:
+            break
+    value = np.full(table.n_models, np.nan)
+    with np.errstate(divide="ignore"):
+        value[scored] = np.log(strength)
+    return Ranking.from_values("bradley-terry", table.models, value)
+
+
 #: Rule name to function, in the order used for reports.
 RULES: dict[str, Callable[[ScoreTable], Ranking]] = {
     "mean": arithmetic_mean,
@@ -200,6 +333,8 @@ RULES: dict[str, Callable[[ScoreTable], Ranking]] = {
     "win-rate": mean_win_rate,
     "borda": borda_count,
     "copeland": copeland,
+    "kemeny": kemeny_young,
+    "bradley-terry": bradley_terry,
 }
 
 

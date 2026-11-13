@@ -1,16 +1,22 @@
+import itertools
 import math
 
 import numpy as np
 import pytest
-from scipy import stats
+from scipy import optimize, stats
 
 from rankstable.rules import (
     RULES,
+    _kemeny_exact,
+    _kemeny_local_search,
     aggregate,
     benchmark_ranks,
     borda_count,
+    bradley_terry,
     copeland,
     geometric_mean,
+    kemeny_score,
+    kemeny_young,
     mean_rank,
     mean_win_rate,
     minmax_mean,
@@ -31,6 +37,33 @@ def table_of(rows, higher_is_better=()):
 
 def ranks(table, rule):
     return aggregate(table, rule).ranks.tolist()
+
+
+def bradley_terry_reference(table, prior=0.5):
+    """Log-strengths by direct minimisation of the penalised negative log-likelihood."""
+    oriented = table.oriented()
+    present = ~np.isnan(oriented)
+    n = table.n_models
+    points = np.zeros(n)
+    contests = np.zeros((n, n))
+    for j in range(table.n_benchmarks):
+        for i, k in itertools.permutations(np.flatnonzero(present[:, j]), 2):
+            contests[i, k] += 0.5
+            contests[k, i] += 0.5
+            points[i] += 1.0 if oriented[i, j] > oriented[k, j] else 0.0
+            points[i] += 0.5 if oriented[i, j] == oriented[k, j] else 0.0
+    contests /= 2  # every ordered pair was visited twice
+    upper = np.triu_indices(n, k=1)
+
+    def loss(theta):
+        pair = np.logaddexp(theta[:, None], theta[None, :])[upper]
+        return (
+            -np.dot(points + prior, theta)
+            + np.dot(contests[upper] * 2, pair)
+            + 2 * prior * np.logaddexp(theta, 0).sum()
+        )
+
+    return optimize.minimize(loss, np.zeros(n), method="BFGS", options={"gtol": 1e-10}).x
 
 
 # A complete profile worked by hand.
@@ -58,6 +91,9 @@ COMPLETE_VALUES = {
     "borda": [4, 3.5, 1.5],
     # A beats B and C two benchmarks to one; B beats C two to none with one level
     "copeland": [2, 0, -2],
+    # the order A, B, C keeps 2 + 2 + 2 of the pairwise wins, more than any other
+    "kemeny": [1, 2, 3],
+    "bradley-terry": None,  # no closed form; checked against a direct optimiser below
 }
 
 COMPLETE_RANKS = {
@@ -69,6 +105,8 @@ COMPLETE_RANKS = {
     "win-rate": [1, 2, 3],
     "borda": [1, 2, 3],
     "copeland": [1, 2, 3],
+    "kemeny": [1, 2, 3],
+    "bradley-terry": [1, 2, 3],
 }
 
 
@@ -81,9 +119,12 @@ def test_complete_profile_by_hand(rule):
     result = aggregate(COMPLETE, rule)
     assert result.rule == rule
     assert result.models == ("A", "B", "C")
-    np.testing.assert_allclose(result.values, COMPLETE_VALUES[rule], rtol=1e-12)
+    if rule == "bradley-terry":
+        np.testing.assert_allclose(result.values, bradley_terry_reference(COMPLETE), atol=1e-6)
+    else:
+        np.testing.assert_allclose(result.values, COMPLETE_VALUES[rule], rtol=1e-12)
     assert result.ranks.tolist() == COMPLETE_RANKS[rule]
-    assert result.higher_is_better == (rule != "mean-rank")
+    assert result.higher_is_better == (rule not in ("mean-rank", "kemeny"))
 
 
 def test_complete_profile_ranks_and_pairwise_wins():
@@ -113,13 +154,19 @@ SPARSE_VALUES = {
     "win-rate": [(2 / 2 + 1 / 1) / 2, (1 / 2 + 1 / 1) / 2, 0],
     "borda": [2 + 1, 1 + 1, 0],
     "copeland": [2, 0, -2],
+    "kemeny": [1, 2, 3],
+    "bradley-terry": None,
 }
 
 
 @pytest.mark.parametrize("rule", list(RULES))
 def test_sparse_profile_by_hand(rule):
     result = aggregate(SPARSE, rule)
-    np.testing.assert_allclose(result.values[:3], SPARSE_VALUES[rule], rtol=1e-12, atol=1e-15)
+    if rule == "bradley-terry":
+        expected = bradley_terry_reference(SPARSE.select(models=["A", "B", "C"]))
+        np.testing.assert_allclose(result.values[:3], expected, atol=1e-6)
+    else:
+        np.testing.assert_allclose(result.values[:3], SPARSE_VALUES[rule], rtol=1e-12, atol=1e-15)
     assert math.isnan(result.values[3])
     assert result.ranks.tolist() == [1, 2, 3, 4]
 
@@ -132,7 +179,19 @@ def test_condorcet_cycle_is_a_three_way_tie():
     np.testing.assert_array_equal(result.values, [0, 0, 0])
     assert result.ranks.tolist() == [1, 1, 1]
     for rule in RULES:
-        assert ranks(cycle, rule) == [1, 1, 1], rule
+        if rule != "kemeny":
+            assert ranks(cycle, rule) == [1, 1, 1], rule
+    # Kemeny-Young has to pick an order. The three rotations of the cycle keep five pairwise
+    # wins each, the other three orders four, and the alphabetically first rotation is reported.
+    wins = pairwise_wins(cycle)
+    scores = {order: kemeny_score(wins, order) for order in itertools.permutations(range(3))}
+    assert sorted(scores.values()) == [4, 4, 4, 5, 5, 5]
+    assert {order for order, score in scores.items() if score == 5} == {
+        (0, 1, 2),
+        (1, 2, 0),
+        (2, 0, 1),
+    }
+    assert kemeny_young(cycle).values.tolist() == [1, 2, 3]
 
 
 def test_majority_winner_can_lose_the_borda_count():
@@ -144,6 +203,10 @@ def test_majority_winner_can_lose_the_borda_count():
     assert ranks(profile, "copeland") == [1, 2, 3]
     assert ranks(profile, "borda") == [2, 1, 3]
     assert ranks(profile, "mean") == [2, 1, 3]
+    # A, B, C keeps 3 + 3 + 5 pairwise wins; B, A, C keeps 2 + 5 + 3
+    assert ranks(profile, "kemeny") == [1, 2, 3]
+    assert kemeny_score(pairwise_wins(profile), [0, 1, 2]) == 11
+    assert kemeny_score(pairwise_wins(profile), [1, 0, 2]) == 10
 
 
 def test_missing_benchmarks_separate_borda_from_win_rate_and_mean_rank():
@@ -312,3 +375,92 @@ def test_cancelling_terms_do_not_break_a_tie():
     assert 0.3 - 0.1 - 0.2 != 0.5 - 0.25 - 0.25
     table = table_of([[0.3, 0.1, 0.2], [0.5, 0.25, 0.25]], higher_is_better=(True, False, False))
     assert ranks(table, "mean") == [1, 1]
+
+
+def test_kemeny_exact_matches_brute_force_up_to_seven_models():
+    rng = np.random.default_rng(10)
+    for n in range(1, 8):
+        for _ in range(6 if n < 7 else 3):
+            table = random_table(rng, n, int(rng.integers(1, 8)), float(rng.choice([0, 0.3])))
+            wins = pairwise_wins(table)
+            scores = {
+                order: kemeny_score(wins, order) for order in itertools.permutations(range(n))
+            }
+            best = max(scores.values())
+            order = tuple(_kemeny_exact(wins))
+            assert scores[order] == best
+            assert order == min(o for o, score in scores.items() if score == best)
+
+
+def test_kemeny_local_search_ends_where_no_single_move_helps():
+    rng = np.random.default_rng(11)
+    for _ in range(30):
+        n = int(rng.integers(2, 8))
+        wins = pairwise_wins(random_table(rng, n, int(rng.integers(1, 8))))
+        order = _kemeny_local_search(wins)
+        assert sorted(order) == list(range(n))
+        reached = kemeny_score(wins, order)
+        assert reached <= kemeny_score(wins, _kemeny_exact(wins))
+        for position in range(n):
+            rest = order[:position] + order[position + 1 :]
+            for slot in range(n):
+                moved = rest[:slot] + [order[position]] + rest[slot:]
+                assert kemeny_score(wins, moved) <= reached
+
+
+def test_kemeny_switches_to_the_local_search_above_the_exact_limit():
+    # A transitive table: every benchmark gives the same order, so the search must find it.
+    table = table_of([[5, 50], [4, 40], [3, 30], [2, 20], [1, 10]])
+    assert kemeny_young(table, exact_limit=0).values.tolist() == [1, 2, 3, 4, 5]
+    assert kemeny_young(table).values.tolist() == [1, 2, 3, 4, 5]
+    rng = np.random.default_rng(12)
+    wide = random_table(rng, 14, 5)
+    result = kemeny_young(wide)
+    assert sorted(result.values.tolist()) == list(range(1, 15))
+
+
+def test_bradley_terry_two_models_closed_form():
+    # A is better on three benchmarks of four: the fitted odds are three to one.
+    table = table_of([[2, 2, 2, 1], [1, 1, 1, 2]])
+    result = bradley_terry(table, prior=0)
+    np.testing.assert_allclose(result.values, [math.log(3) / 2, -math.log(3) / 2], atol=1e-8)
+    # a tie is half a win each: 2.5 wins against 1.5
+    tied = bradley_terry(table_of([[2, 2, 1, 1], [1, 1, 2, 1]]), prior=0)
+    np.testing.assert_allclose(tied.values[0] - tied.values[1], math.log(2.5 / 1.5), atol=1e-8)
+
+
+def test_bradley_terry_matches_a_direct_optimiser():
+    rng = np.random.default_rng(13)
+    for missing in (0.0, 0.3):
+        for _ in range(6):
+            table = random_table(rng, int(rng.integers(3, 8)), int(rng.integers(3, 8)), missing)
+            keep = [
+                m
+                for m, row in zip(table.models, table.scores, strict=True)
+                if not np.isnan(row).all()
+            ]
+            table = table.select(models=keep)
+            for prior in (0.5, 2.0):
+                np.testing.assert_allclose(
+                    bradley_terry(table, prior=prior).values,
+                    bradley_terry_reference(table, prior),
+                    atol=1e-5,
+                )
+
+
+def test_bradley_terry_orders_a_complete_table_like_borda():
+    rng = np.random.default_rng(14)
+    for _ in range(20):
+        table = random_table(rng, int(rng.integers(2, 9)), int(rng.integers(1, 7)))
+        assert ranks(table, "bradley-terry") == ranks(table, "borda")
+
+
+def test_bradley_terry_prior_keeps_a_clean_sweep_finite():
+    table = table_of([[3, 3, nan], [2, 2, 5], [1, 1, 4], [nan, nan, nan]])
+    result = bradley_terry(table)
+    assert np.isfinite(result.values[:3]).all()
+    assert math.isnan(result.values[3])
+    assert result.ranks.tolist() == [1, 2, 3, 4]
+    assert bradley_terry(table, prior=5).values[0] < result.values[0]
+    with pytest.raises(ValueError, match="prior cannot be negative"):
+        bradley_terry(table, prior=-1)
