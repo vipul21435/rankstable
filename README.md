@@ -253,7 +253,7 @@ Where the rules come from, as far as the pages fetched for this README state it:
   (BT) model". They work with instance-level scores inside one benchmark; here a "contest" is
   a whole benchmark.
 - Aggregating per-task rankings with rules from social choice theory is proposed by Colombo et
-  al. (2022, above) and by Rofin et al.,
+  al. (2022, above) and by Rofin et al. (2022; its arXiv page says "To appear in EACL 2023"),
   [Vote'n'Rank: Revision of Benchmarking with Social Choice Theory](https://arxiv.org/abs/2210.05769),
   "a framework for ranking systems in multi-task benchmarks under the principles of the social
   choice theory". Borda, Copeland and Kemeny-Young are implemented here from their textbook
