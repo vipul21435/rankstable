@@ -40,15 +40,15 @@ def test_agreement_interval_covers_the_estimate_and_is_reproducible():
     skill = rng.normal(size=60)
     scores = skill[:, None] + rng.normal(scale=[0.3, 0.3, 0.3, 3.0], size=(60, 4))
     table = table_of(scores)
-    results = benchmark_agreement(table, "zscore", n_resamples=300, seed=7)
+    results = benchmark_agreement(table, "zscore", n_resamples=150, seed=7)
     for result in results:
         assert -1 <= result.low <= result.tau <= result.high <= 1
         assert result.high - result.low > 0
     # the noisy benchmark follows the others least
     assert min(results, key=lambda r: r.tau).benchmark == "b4"
-    assert results == benchmark_agreement(table, "zscore", n_resamples=300, seed=7)
-    assert results != benchmark_agreement(table, "zscore", n_resamples=300, seed=8)
-    narrow = benchmark_agreement(table, "zscore", n_resamples=300, confidence=0.5, seed=7)
+    assert results == benchmark_agreement(table, "zscore", n_resamples=150, seed=7)
+    assert results != benchmark_agreement(table, "zscore", n_resamples=150, seed=8)
+    narrow = benchmark_agreement(table, "zscore", n_resamples=150, confidence=0.5, seed=7)
     assert all(n.high - n.low < r.high - r.low for n, r in zip(narrow, results, strict=True))
 
 

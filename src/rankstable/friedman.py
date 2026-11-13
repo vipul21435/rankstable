@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import math
 from dataclasses import dataclass
 
@@ -184,6 +185,7 @@ def range_cdf(r: float, k: int) -> float:
     return float((integrand[:-1] + integrand[1:]).sum() * step / 2)
 
 
+@functools.lru_cache(maxsize=256)
 def nemenyi_q(k: int, alpha: float = 0.05) -> float:
     """Critical value ``q_alpha`` of the Nemenyi test for ``k`` models.
 
