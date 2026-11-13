@@ -97,6 +97,27 @@ class ScoreTable:
             higher_is_better=tuple(self.higher_is_better[j] for j in cols),
         )
 
+    def resample_benchmarks(self, positions: Sequence[int] | np.ndarray) -> ScoreTable:
+        """The table made of the benchmarks at ``positions``, which may repeat.
+
+        A benchmark drawn more than once appears as separate columns, the repeats named
+        ``name (2)``, ``name (3)`` and so on. This is the resampling step of a bootstrap over
+        benchmarks.
+        """
+        seen: dict[int, int] = {}
+        names = []
+        for position in (int(j) for j in positions):
+            seen[position] = seen.get(position, 0) + 1
+            name = self.benchmarks[position]
+            names.append(name if seen[position] == 1 else f"{name} ({seen[position]})")
+        columns = [int(j) for j in positions]
+        return ScoreTable(
+            self.models,
+            tuple(names),
+            self.scores[:, columns],
+            tuple(self.higher_is_better[j] for j in columns),
+        )
+
     def drop_incomplete(self, axis: str = "models") -> ScoreTable:
         """Drop every model (or every benchmark) that has a missing cell."""
         missing = np.isnan(self.scores)

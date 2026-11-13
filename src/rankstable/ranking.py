@@ -75,6 +75,20 @@ def kendall_tau(a: Sequence[float] | np.ndarray, b: Sequence[float] | np.ndarray
     The pairs are counted by sorting on the first sequence and counting inversions of the
     second with a merge sort, so the cost is O(n log^2 n) rather than O(n^2).
     """
+    concordant, discordant, tied_x, tied_y, _, pairs = pair_counts(a, b)
+    scale = math.sqrt((pairs - tied_x) * (pairs - tied_y))
+    return (concordant - discordant) / scale if scale > 0 else math.nan
+
+
+def pair_counts(
+    a: Sequence[float] | np.ndarray, b: Sequence[float] | np.ndarray
+) -> tuple[int, int, int, int, int, int]:
+    """Count the pairs of positions by how the two sequences order them.
+
+    Returns ``(concordant, discordant, tied_a, tied_b, tied_both, pairs)``: pairs ordered the
+    same way, pairs ordered oppositely, pairs tied in ``a``, pairs tied in ``b``, pairs tied
+    in both (these are also counted in the two previous numbers) and all ``n(n-1)/2`` pairs.
+    """
     x = np.asarray(a, dtype=float)
     y = np.asarray(b, dtype=float)
     if x.ndim != 1 or x.shape != y.shape:
@@ -82,20 +96,19 @@ def kendall_tau(a: Sequence[float] | np.ndarray, b: Sequence[float] | np.ndarray
     if np.isnan(x).any() or np.isnan(y).any():
         raise ValueError("kendall_tau does not accept nan")
     n = x.size
+    pairs = n * (n - 1) // 2
     if n < 2:
-        return math.nan
+        return 0, 0, 0, 0, 0, pairs
     order = np.lexsort((y, x))
     x = x[order]
     y = y[order]
-    pairs = n * (n - 1) // 2
     tied_x = _tied_pairs(np.diff(x) != 0)
     tied_both = _tied_pairs((np.diff(x) != 0) | (np.diff(y) != 0))
     tied_y = _tied_pairs(np.diff(np.sort(y)) != 0)
     # Within equal x the y are ascending, so an inversion of y is a discordant pair.
     discordant = _inversions(y)
     concordant = pairs - tied_x - tied_y + tied_both - discordant
-    scale = math.sqrt((pairs - tied_x) * (pairs - tied_y))
-    return (concordant - discordant) / scale if scale > 0 else math.nan
+    return concordant, discordant, tied_x, tied_y, tied_both, pairs
 
 
 def _tied_pairs(changes: np.ndarray) -> int:
