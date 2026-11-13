@@ -592,14 +592,15 @@ uv run --extra dev pytest -q
 uv run --extra dev ruff check .
 ```
 
-178 tests, which take about 20 seconds on an idle machine; statement coverage is 99 %
+178 tests; the full run took between 25 and 99 seconds here, on a machine shared with other
+jobs. Statement coverage is 99 %
 (`uv run --extra dev pytest --cov=rankstable`).
 The tests check every rule against profiles worked by hand, including a Condorcet cycle; the
 exact Kemeny-Young order against brute force over all permutations for up to seven models;
 Kendall's tau-b, ranks, z-scores, geometric means, the Friedman statistic, the chi-square and
 F tail probabilities and the Nemenyi critical values against scipy; Bradley-Terry against a
-direct optimiser; and invariance to the order of models and benchmarks. scipy and matplotlib
-are needed for the tests only.
+direct optimiser; and invariance to the order of models and benchmarks. scipy is needed for
+the tests only, matplotlib for the tests and the diagram.
 
 ## Licence
 
