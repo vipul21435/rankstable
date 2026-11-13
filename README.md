@@ -317,7 +317,9 @@ Pairs are counted with a merge sort in `O(n log^2 n)`.
 
 **Top-k overlap** is `|A & B| / max(|A|, |B|)`, where `A` and `B` hold the models ranked `k`
 or better by each rule. A tie at the boundary puts every tied model in the set, so a set can
-have more than `k` members.
+have more than `k` members. The `top k (rank)` column of `compare-rules` lists the same set:
+models tied at the boundary are all named when up to five of them are extra, and counted
+beyond that.
 
 ### Stability
 
@@ -393,7 +395,9 @@ models have a zero on some benchmark and tie for last place under `geomean`, and
 the figure is 0.864 (details below the tables). `mean-rank`, `win-rate`, `borda` and
 `bradley-terry` coincide, as they must on a complete table. The first place goes to one model under `mean`, `minmax`, `zscore`, `geomean`
 and `copeland`, to a second model under `mean-rank`, `win-rate`, `borda` and `bradley-terry`,
-and to a third under `kemeny`, which at this size is the local-search heuristic.
+and to a third under `kemeny`, which at this size is the local-search heuristic. That third
+model is one of two entries with identical scores on all six benchmarks; `kemeny` has to put
+one before the other, and the alphabetical tie-break decides which.
 
 ```
 rankstable compare-rules open_llm_leaderboard.csv --top 5
@@ -429,6 +433,13 @@ Share of the top 5 in common:
 | kemeny | 0.400 | 0.667 | 0.667 | 0.667 | 0.400 | 0.400 | 0.400 | 0.800 | 1.000 | 0.400 |
 | bradley-terry | 0.800 | 0.667 | 0.667 | 0.667 | 1.000 | 1.000 | 1.000 | 0.600 | 0.400 | 1.000 |
 
+**Duplicate rows.** 100 of the 4,576 entries, in 46 groups of two to four, have exactly the
+same six scores as another entry. They account for some of the figures above. Under
+`minmax`, `zscore` and `geomean` two such entries tie for fifth place, so the top five has
+six members and its overlap with the top five of `mean` is 4 of 6, the 0.667 in the table.
+`copeland` ties three entries for third place. The counts come from
+`examples/table_checks.py`, whose output is shown below.
+
 **Zero scores under `geomean`.** 332 of the 4,576 models have a zero on at least one
 benchmark (GPQA 241, MATH Lvl 5 134, IFEval 7, MUSR 1, MMLU-PRO 1). `geomean` gives each of
 them 0, so they all share rank 4,245, the last place. That tie is part of what separates
@@ -451,6 +462,7 @@ Kendall tau-b between geomean and other rules: all 4576 models / the 4244 models
   zscore     0.915 / 0.926
   mean-rank  0.919 / 0.927
   copeland   0.899 / 0.907
+models that share all their scores with another model: 100, in 46 groups of 2 to 4
 ```
 
 **Leave benchmarks out.** Dropping one of the six benchmarks changes the first place in 1 of
@@ -598,7 +610,9 @@ most of it in `kemeny` and `bradley-terry`; the `stability` run with 1000 resamp
 - **Missing cells are never imputed.** Each rule handles them as described above, and the
   rules differ in how much a missing benchmark costs a model.
 - **The real-data numbers describe one snapshot** of one leaderboard, in which many entries
-  are variants of the same base model.
+  are variants of the same base model. 100 entries (46 groups) have exactly the same scores
+  as another entry. Rules that allow ties rank such entries together; `kemeny` must order
+  them and does so alphabetically, which is how its first place on that table was decided.
 - Inputs are tables of final scores. Instance-level scores and the uncertainty inside one
   benchmark are out of scope; see evalstats below.
 

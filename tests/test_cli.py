@@ -517,3 +517,27 @@ def test_cd_errors_and_perfect_agreement(tmp_path, capsys):
     assert "Iman-Davenport F = inf on 2 and 4 degrees of freedom, p = 0." in out
     code, out, _ = run(capsys, "cd", same, "--format", "json")
     assert json.loads(out)["f"] is None
+
+
+def test_compare_rules_names_every_model_tied_at_the_cut(tmp_path, capsys):
+    # b and c tie for second place, so the top two has three members
+    path = write(tmp_path, "tied.csv", "model,x,y\na,4,4\nb,3,3\nc,3,3\nd,1,2\n")
+    code, out, _ = run(capsys, "compare-rules", path, "--rules", "mean,copeland", "--top", 2)
+    assert code == 0
+    assert "| mean | a (1), b (2), c (2) |" in out
+    assert "| copeland | a (1), b (2), c (2) |" in out
+    # up to five extra models are named
+    six = "".join(f"m{i},1\n" for i in range(6))
+    path = write(tmp_path, "six.csv", "model,x\nbest,9\n" + six)
+    code, out, _ = run(capsys, "compare-rules", path, "--rules", "mean", "--top", 2)
+    assert "| mean | best (1), m0 (2), m1 (2), m2 (2), m3 (2), m4 (2), m5 (2) |" in out
+
+
+def test_compare_rules_counts_a_long_tie_at_the_cut(tmp_path, capsys):
+    eight = "".join(f"m{i},1\n" for i in range(8))
+    path = write(tmp_path, "long.csv", "model,x\nbest,9\n" + eight)
+    code, out, _ = run(capsys, "compare-rules", path, "--rules", "mean", "--top", 2)
+    assert code == 0
+    assert "| mean | best (1), m0 (2), and 7 more tied at rank 2 |" in out
+    code, out, _ = run(capsys, "compare-rules", path, "--rules", "mean", "--top", 1)
+    assert "| mean | best (1) |" in out

@@ -5,6 +5,9 @@
 Zero scores matter for the geometric mean: a model with a zero on any benchmark gets a
 geometric mean of zero and ties with every other such model. The script counts them and
 gives Kendall's tau-b between ``geomean`` and other rules with and without those models.
+
+Rows with identical scores tie under every rule that allows ties, and a rule that must
+produce a strict order (``kemeny``) separates them by name only. The script counts them too.
 """
 
 from __future__ import annotations
@@ -48,6 +51,18 @@ def report_zero_scores(table: ScoreTable) -> None:
         print(f"  {rule:10s} {full:.3f} / {part:.3f}")
 
 
+def report_duplicate_rows(table: ScoreTable) -> None:
+    groups: dict[bytes, int] = {}
+    for row in table.scores:
+        key = (row + 0.0).tobytes()  # adding zero makes -0.0 and 0.0 the same bytes
+        groups[key] = groups.get(key, 0) + 1
+    repeated = [size for size in groups.values() if size > 1]
+    line = f"models that share all their scores with another model: {sum(repeated)}"
+    if repeated:
+        line += f", in {len(repeated)} groups of {min(repeated)} to {max(repeated)}"
+    print(line)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("table", help="wide CSV or long JSONL")
@@ -55,6 +70,7 @@ def main() -> int:
     table = read_table(args.table)
     print(f"{table.n_models} models, {table.n_benchmarks} benchmarks")
     report_zero_scores(table)
+    report_duplicate_rows(table)
     return 0
 
 

@@ -276,6 +276,26 @@ def _json_number(value: float) -> float | None:
     return None if math.isnan(value) else float(value)
 
 
+#: A tie at the cut of a top list is spelled out up to this many extra models.
+TIE_LIST_LIMIT = 5
+
+
+def _top_list(ranking: Ranking, k: int) -> str:
+    """The models ranked ``k`` or better as ``name (rank)``, best first.
+
+    This is the set that the top-k overlap uses. A tie at the boundary makes it longer than
+    ``k``: the tied models are all named while at most ``TIE_LIST_LIMIT`` are extra, and
+    counted beyond that.
+    """
+    rows = [row for row in ranking.rows() if row["rank"] <= k]
+    extra = len(rows) - k
+    shown = rows[:k] if extra > TIE_LIST_LIMIT else rows
+    text = ", ".join(f"{_cell(row['model'])} ({row['rank']})" for row in shown)
+    if extra > TIE_LIST_LIMIT:
+        text += f", and {extra} more tied at rank {rows[-1]['rank']}"
+    return text
+
+
 def _run_compare(args: argparse.Namespace) -> str:
     table = _load(args)
     names = _select_rules(args.rules)
@@ -303,16 +323,7 @@ def _run_compare(args: argparse.Namespace) -> str:
         }
         return json.dumps(payload, indent=2)
 
-    top_rows = [
-        [
-            name,
-            ", ".join(
-                f"{_cell(row['model'])} ({row['rank']})"
-                for row in rankings[name].rows()[: args.top]
-            ),
-        ]
-        for name in used
-    ]
+    top_rows = [[name, _top_list(rankings[name], args.top)] for name in used]
     align = "l" + "r" * len(used)
     lines = [
         f"{_shape_sentence(table)}.",

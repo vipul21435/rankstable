@@ -56,6 +56,18 @@ def test_table_checks_counts_zero_scores_and_their_effect_on_geomean(tmp_path):
     # in the mean and two in the geometric mean: 7 / sqrt(9 * 8). Among c, d, e alone one
     # pair agrees and each ranking ties one pair: 1 / sqrt(2 * 2).
     assert "  mean       0.825 / 0.500" in lines
+    assert lines[-1] == "models that share all their scores with another model: 0"
+
+
+def test_table_checks_counts_duplicate_rows(tmp_path):
+    path = tmp_path / "scores.csv"
+    rows = ["a,1,5", "b,4,2", "c,1,5", "d,4,2", "e,1,5", "f,0,-0.0", "g,-0,0", "h,7,7"]
+    path.write_text("model,x,y\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    lines = run_example("table_checks.py", path)
+    # a, c, e share their scores, so do b, d, and so do f, g, whose zeros differ only in sign
+    assert lines[-1] == (
+        "models that share all their scores with another model: 7, in 3 groups of 2 to 3"
+    )
 
 
 def test_table_checks_without_zero_scores(tmp_path):
