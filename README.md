@@ -650,8 +650,11 @@ uv run --extra dev pytest -q
 uv run --extra dev ruff check .
 ```
 
-178 tests; the full run took between 25 and 99 seconds here, on a machine shared with other
-jobs. Statement coverage is 99 %
+189 tests. The suite uses about 4 seconds of CPU time (`time uv run --extra dev pytest -q`:
+3.9 s user on Python 3.12 and 3.7 s on Python 3.10 here) and 4 to 5 seconds of wall time on
+an idle machine; the first run in a fresh environment took 28 seconds. Wall time grows with
+the load of the machine: an earlier version with slower tests took between 21 and 99 seconds
+here while other jobs kept the machine busy. Statement coverage is 99 %
 (`uv run --extra dev pytest --cov=rankstable`).
 The tests check every rule against profiles worked by hand, including a Condorcet cycle; the
 exact Kemeny-Young order against brute force over all permutations for up to seven models;

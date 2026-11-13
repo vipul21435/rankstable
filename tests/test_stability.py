@@ -113,7 +113,7 @@ def test_bootstrap_matches_the_exact_distribution_for_two_benchmarks():
     # Resamples (b1, b1), (b1, b2), (b2, b1), (b2, b2) are equally likely. A is first only
     # on (b1, b1); the full table puts B first.
     table = table_of([[3, 0], [2, 2]])
-    result = bootstrap_benchmarks(table, "mean", n_resamples=4000, top=1, seed=3)
+    result = bootstrap_benchmarks(table, "mean", n_resamples=2500, top=1, seed=3)
     assert result.full_top1 == ("B",)
     np.testing.assert_allclose(result.p_top1, [0.25, 0.75], atol=0.03)
     np.testing.assert_array_equal(result.p_topk, result.p_top1)

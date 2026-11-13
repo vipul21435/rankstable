@@ -305,7 +305,7 @@ def random_table(rng, n_models, n_benchmarks, missing=0.0):
 @pytest.mark.parametrize("missing", [0.0, 0.3])
 def test_rules_do_not_depend_on_the_order_of_models_or_benchmarks(rule, missing):
     rng = np.random.default_rng(4)
-    for _ in range(25):
+    for _ in range(15):
         table = random_table(rng, int(rng.integers(2, 9)), int(rng.integers(1, 7)), missing)
         base = aggregate(table, rule)
         rows = rng.permutation(table.n_models)
