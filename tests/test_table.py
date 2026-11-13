@@ -203,3 +203,74 @@ def test_drop_incomplete_models_or_benchmarks():
         sparse.drop_incomplete("models")
     with pytest.raises(ValueError, match="no benchmark has a score for every model"):
         sparse.drop_incomplete("benchmarks")
+
+
+def test_long_jsonl_lines_end_only_at_newlines():
+    # U+2028 is legal inside a JSON string and must not split the line.
+    first = '{"model": "a\u2028b", "benchmark": "x", "score": 1}'
+    second = '{"model": "c", "benchmark": "x", "score": 2}'
+    text = first + "\r\n" + second + "\r\n"
+    assert "\u2028" in first
+    table = parse_long_jsonl(text)
+    assert table.models == ("a\u2028b", "c")
+
+
+def test_parsers_turn_unusual_input_into_value_errors():
+    with pytest.raises(ValueError, match="line 1: scores must be finite"):
+        parse_long_jsonl('{"model": "a", "benchmark": "x", "score": 1' + "0" * 400 + "}")
+    with pytest.raises(ValueError, match="line 1: invalid JSON"):
+        parse_long_jsonl("[" * 100000 + "]" * 100000)
+    with pytest.raises(ValueError, match="line 1: invalid JSON"):
+        parse_long_jsonl('{"model": "a", "benchmark": "x", "score": 1' + "0" * 5000 + "}")
+    with pytest.raises(ValueError):
+        parse_wide_csv("model,x\na,1\x00\n")
+    with pytest.raises(ValueError, match="not a readable CSV table"):
+        parse_wide_csv("model,x\na," + "1" * 200000 + "\n")
+    quoted = parse_wide_csv('model,"x,1"\r\n"a ""b""",2\r\n')
+    assert (quoted.models, quoted.benchmarks) == (('a "b"',), ("x,1",))
+
+
+def test_parsers_only_ever_raise_value_errors():
+    rng = np.random.default_rng(0)
+    pieces = [
+        ",",
+        "\n",
+        "\r\n",
+        '"',
+        "\t",
+        " ",
+        "a",
+        "b",
+        "model",
+        "1",
+        "-2.5",
+        "1e400",
+        "nan",
+        "inf",
+        "{",
+        "}",
+        "[",
+        "]",
+        ":",
+        '"model"',
+        '"benchmark"',
+        '"score"',
+        "null",
+        "true",
+        "\x00",
+        "\u2028",
+        "é",
+        "0x1f",
+        "1_0",
+        "-",
+        "NA",
+    ]
+    for _ in range(3000):
+        text = "".join(rng.choice(pieces, size=int(rng.integers(0, 25))))
+        for parse in (parse_wide_csv, parse_long_jsonl):
+            try:
+                table = parse(text)
+            except ValueError:
+                continue
+            assert table.n_models >= 1 and table.n_benchmarks >= 1
+            assert not np.isinf(table.scores).any()

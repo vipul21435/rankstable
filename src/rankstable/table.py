@@ -173,9 +173,13 @@ def parse_wide_csv(text: str, *, delimiter: str = ",") -> ScoreTable:
     cell is ignored). A cell that is empty or one of ``NA``, ``N/A``, ``NaN``, ``null``,
     ``None`` or ``-`` is a missing score. Blank lines are skipped.
     """
+    try:
+        parsed = list(csv.reader(io.StringIO(text, newline=""), delimiter=delimiter))
+    except csv.Error as error:
+        raise ValueError(f"not a readable CSV table: {error}") from None
     rows = [
         (number, [cell.strip() for cell in row])
-        for number, row in enumerate(csv.reader(io.StringIO(text), delimiter=delimiter), start=1)
+        for number, row in enumerate(parsed, start=1)
         if any(cell.strip() for cell in row)
     ]
     if not rows:
@@ -225,13 +229,16 @@ def parse_long_jsonl(text: str) -> ScoreTable:
     benchmarks: dict[str, int] = {}
     directions: dict[str, bool] = {}
     cells: dict[tuple[int, int], float] = {}
-    for number, line in enumerate(text.splitlines(), start=1):
+    for number, line in enumerate(text.split("\n"), start=1):
         if not line.strip():
             continue
         try:
             record = json.loads(line)
         except json.JSONDecodeError as error:
             raise ValueError(f"line {number}: invalid JSON ({error.msg})") from None
+        except (RecursionError, ValueError) as error:
+            # nesting too deep for the parser, or an integer too long to convert
+            raise ValueError(f"line {number}: invalid JSON ({error})") from None
         if not isinstance(record, dict):
             raise ValueError(f"line {number}: expected a JSON object")
         model = _name_field(record, "model", number)
@@ -244,7 +251,10 @@ def parse_long_jsonl(text: str) -> ScoreTable:
         elif isinstance(score, bool) or not isinstance(score, (int, float)):
             raise ValueError(f"line {number}: 'score' must be a number or null")
         else:
-            value = float(score)
+            try:
+                value = float(score)
+            except OverflowError:
+                value = math.inf
             if math.isinf(value):
                 raise ValueError(f"line {number}: scores must be finite")
         flag = record.get("higher_is_better")

@@ -592,7 +592,7 @@ uv run --extra dev pytest -q
 uv run --extra dev ruff check .
 ```
 
-175 tests, which run in under a minute; statement coverage is 99 %
+178 tests, which take about 20 seconds on an idle machine; statement coverage is 99 %
 (`uv run --extra dev pytest --cov=rankstable`).
 The tests check every rule against profiles worked by hand, including a Condorcet cycle; the
 exact Kemeny-Young order against brute force over all permutations for up to seven models;
