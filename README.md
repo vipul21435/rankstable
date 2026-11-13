@@ -276,8 +276,11 @@ differ once cells are missing.
 programming over subsets of models (`2^n * n` steps). Above that a local search is used: start
 from the order by total pairwise wins and move one model at a time to the position that
 raises the objective most, until no single move helps. That result is a heuristic without an
-optimality guarantee. Several orders can be equally good (three in a Condorcet cycle); the
-alphabetically first is reported, so `kemeny` never shows ties.
+optimality guarantee. On 60 seeded random tables of 10 to 12 models, where the exact answer
+is available, the search reached the best order in 58 (96.7 %); the shortfall of the
+objective was 0.023 % on average and 1.06 % at worst (`python examples/kemeny_gap.py`).
+Several orders can be equally good (three in a Condorcet cycle); the alphabetically first is
+reported, so `kemeny` never shows ties.
 
 **Bradley-Terry.** Each benchmark is a round of contests between the models scored on it; a
 tie is half a win for each side. The strengths are fitted with the
@@ -586,7 +589,12 @@ most of it in `kemeny` and `bradley-terry`; the `stability` run with 1000 resamp
 
 - **Kemeny-Young is exact only up to 12 models.** Above that the result comes from a local
   search and may not be the best order; every number for `kemeny` on the real table is from
-  that heuristic. When several orders are equally good only one is reported.
+  that heuristic. Its quality is measured only where the exact answer exists (the 60 small
+  random tables above). On the real table its order keeps 85.42 % of the 62,663,470 decided
+  pairwise comparisons, against 85.32 % for the `copeland` order and 84.83 % for the
+  `mean-rank` order (`python examples/kemeny_gap.py --table open_llm_leaderboard.csv`); how
+  far that is from the best order is not known. When several orders are equally good only
+  one is reported.
 - **Pairwise rules are slow on large tables.** `copeland`, `kemeny` and `bradley-terry` build
   an `n`-by-`n` matrix. On 4,576 models that made `kemeny` and `bradley-terry` too slow to
   put inside the bootstrap, so the real-data bootstrap above covers seven rules, and the
@@ -627,6 +635,10 @@ most of it in `kemeny` and `bradley-terry`; the `stability` run with 1000 resamp
   preference data.
 - BenchBench, the Python package introduced by Perlitz et al. (2024, above), is built for
   benchmark agreement testing against many reference benchmarks.
+- [irtbench](https://github.com/vipul21435/irtbench): item response theory for benchmark results: which items separate models, and how small a subset of items predicts the full score.
+- [mcqaudit](https://github.com/vipul21435/mcqaudit): what a multiple-choice benchmark gives away before any model reads the question.
+- [evaltable](https://github.com/vipul21435/evaltable): one per-item results table from many evaluation harness formats.
+- [retrievalstats](https://github.com/vipul21435/retrievalstats): retrieval metrics with paired significance tests for comparing runs.
 
 ## Development
 

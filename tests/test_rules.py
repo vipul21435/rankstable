@@ -408,6 +408,24 @@ def test_kemeny_local_search_ends_where_no_single_move_helps():
                 assert kemeny_score(wins, moved) <= reached
 
 
+def test_kemeny_local_search_stays_close_to_the_best_order_on_random_tables():
+    # Tables with a shared skill signal of random strength plus noise, small enough to solve
+    # exactly. With this seed the search misses the best order once, by under one percent.
+    rng = np.random.default_rng(16)
+    shortfalls = []
+    for _ in range(40):
+        n, m = int(rng.integers(8, 11)), int(rng.integers(3, 13))
+        scores = rng.uniform(0, 1.5) * rng.normal(size=(n, 1)) + rng.normal(size=(n, m))
+        wins = pairwise_wins(table_of(scores))
+        best = kemeny_score(wins, _kemeny_exact(wins))
+        found = kemeny_score(wins, _kemeny_local_search(wins))
+        assert found <= best
+        shortfalls.append((best - found) / best)
+    assert sum(shortfall == 0 for shortfall in shortfalls) >= 36
+    assert max(shortfalls) < 0.02
+    assert sum(shortfalls) / len(shortfalls) < 0.002
+
+
 def test_kemeny_switches_to_the_local_search_above_the_exact_limit():
     # A transitive table: every benchmark gives the same order, so the search must find it.
     table = table_of([[5, 50], [4, 40], [3, 30], [2, 20], [1, 10]])

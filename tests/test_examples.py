@@ -76,3 +76,18 @@ def test_table_checks_without_zero_scores(tmp_path):
     lines = run_example("table_checks.py", path)
     assert lines[1] == "models with a zero score on at least one benchmark: 0"
     assert not any(line.startswith("Kendall") for line in lines)
+
+
+def test_kemeny_gap_script_reports_the_study_and_a_table():
+    lines = run_example(
+        "kemeny_gap.py", "--profiles", 6, "--seed", 1, "--table", EXAMPLES / "toy_scores.csv"
+    )
+    assert lines[0] == "6 random tables of 10 to 12 models and 3 to 12 benchmarks, seed 1"
+    assert lines[1].startswith("local search reached the best order in ")
+    assert lines[2].startswith("shortfall of the objective: mean ")
+    # 15 pairs of models on 5 benchmarks without ties: 75 decided comparisons
+    assert lines[3].endswith("toy_scores.csv: 6 models, 75 decided pairwise comparisons")
+    kept = [int(line.split(": ")[1].split()[0]) for line in lines[4:7]]
+    assert [line.split()[3] for line in lines[4:7]] == ["kemeny", "copeland", "mean-rank"]
+    # six models are solved exactly, so no other order keeps more
+    assert kept[0] == max(kept) <= 75
