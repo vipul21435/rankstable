@@ -37,13 +37,16 @@ def competition_ranks(
     *,
     higher_is_better: bool = True,
     rel_tol: float = TIE_REL_TOL,
+    scale: float = 0.0,
 ) -> np.ndarray:
     """Integer ranks with 1 for the best value; tied values share the smallest rank (1, 2, 2, 4).
 
     Values are tied when they differ by at most ``rel_tol`` times the largest absolute value,
     so that two aggregates that are equal on paper do not get ordered by rounding error. The
-    grouping walks the sorted values and starts a new group at every larger gap. ``nan``
-    entries share the last place, one below the number of ranked values.
+    grouping walks the sorted values and starts a new group at every larger gap. ``scale`` is
+    the size of the terms the values were computed from; pass it when terms can cancel, since
+    the rounding error of a sum is relative to its terms and not to the sum. ``nan`` entries
+    share the last place, one below the number of ranked values.
     """
     column = np.asarray(values, dtype=float)
     present = np.flatnonzero(~np.isnan(column))
@@ -53,7 +56,7 @@ def competition_ranks(
     key = column[present] if higher_is_better else -column[present]
     order = np.argsort(-key, kind="stable")
     descending = key[order]
-    tolerance = rel_tol * float(np.max(np.abs(descending)))
+    tolerance = rel_tol * max(float(np.max(np.abs(descending))), scale)
     starts_group = np.ones(order.size, dtype=bool)
     starts_group[1:] = (descending[:-1] - descending[1:]) > tolerance
     group_start = np.maximum.accumulate(np.where(starts_group, np.arange(order.size), 0))
@@ -114,12 +117,16 @@ class Ranking:
         values: Sequence[float] | np.ndarray,
         *,
         higher_is_better: bool = True,
+        scale: float = 0.0,
     ) -> Ranking:
-        """Build a ranking from one value per model."""
+        """Build a ranking from one value per model.
+
+        ``scale`` is passed on to :func:`competition_ranks` for the tie tolerance.
+        """
         column = np.array(values, dtype=float)
         if column.shape != (len(models),):
             raise ValueError(f"expected {len(models)} values, got shape {column.shape}")
-        ranks = competition_ranks(column, higher_is_better=higher_is_better)
+        ranks = competition_ranks(column, higher_is_better=higher_is_better, scale=scale)
         column.setflags(write=False)
         ranks.setflags(write=False)
         return cls(rule, tuple(models), column, higher_is_better, ranks)
