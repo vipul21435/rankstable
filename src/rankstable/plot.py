@@ -13,16 +13,15 @@ def plot_critical_difference(
     """Draw mean ranks on an axis with the best rank to the right and save the figure.
 
     A thick bar joins every group of models whose mean ranks span less than the critical
-    difference, and a ruler of that length is drawn above the axis.
+    difference, and a ruler of that length is drawn above the axis. The figure is built
+    without pyplot, so the matplotlib backend of the calling program is not changed.
     """
     try:
-        import matplotlib
+        from matplotlib.figure import Figure
     except ImportError:
         raise ValueError(
             'the diagram needs matplotlib; install it with pip install "rankstable[plot]"'
         ) from None
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
 
     k = len(result.models)
     order = sorted(range(k), key=lambda i: (result.mean_ranks[i], result.models[i]))
@@ -36,7 +35,9 @@ def plot_critical_difference(
     rows = max(half, k - half)
     bar_space = 0.12 * (len(groups) + 1)
     height = 1.6 + 0.28 * rows + bar_space
-    figure, axis = plt.subplots(figsize=(9, height))
+    # A bare Figure is drawn and saved without pyplot, so the caller's backend is left alone.
+    figure = Figure(figsize=(9, height))
+    axis = figure.add_subplot()
     axis.set_xlim(-0.35, 1.35)
     axis.set_ylim(-(bar_space + 0.28 * rows + 0.2), 0.75)
     axis.axis("off")
@@ -70,4 +71,3 @@ def plot_critical_difference(
     if title:
         axis.set_title(title, fontsize=10)
     figure.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close(figure)
