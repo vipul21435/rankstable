@@ -388,8 +388,10 @@ python examples/fetch_open_llm_leaderboard.py open_llm_leaderboard.csv
 ```
 
 **Kendall's tau between rules.** Over all 4,576 models, tau-b between two rules ranges from
-0.859 (`mean` against `geomean`) to 1. `mean-rank`, `win-rate`, `borda` and `bradley-terry` coincide, as they must on a
-complete table. The first place goes to one model under `mean`, `minmax`, `zscore`, `geomean`
+0.859 (`mean` against `geomean`) to 1. Part of that lowest value comes from zero scores: 332
+models have a zero on some benchmark and tie for last place under `geomean`, and without them
+the figure is 0.864 (details below the tables). `mean-rank`, `win-rate`, `borda` and
+`bradley-terry` coincide, as they must on a complete table. The first place goes to one model under `mean`, `minmax`, `zscore`, `geomean`
 and `copeland`, to a second model under `mean-rank`, `win-rate`, `borda` and `bradley-terry`,
 and to a third under `kemeny`, which at this size is the local-search heuristic.
 
@@ -426,6 +428,30 @@ Share of the top 5 in common:
 | copeland | 0.600 | 0.833 | 0.833 | 0.833 | 0.600 | 0.600 | 0.600 | 1.000 | 0.800 | 0.600 |
 | kemeny | 0.400 | 0.667 | 0.667 | 0.667 | 0.400 | 0.400 | 0.400 | 0.800 | 1.000 | 0.400 |
 | bradley-terry | 0.800 | 0.667 | 0.667 | 0.667 | 1.000 | 1.000 | 1.000 | 0.600 | 0.400 | 1.000 |
+
+**Zero scores under `geomean`.** 332 of the 4,576 models have a zero on at least one
+benchmark (GPQA 241, MATH Lvl 5 134, IFEval 7, MUSR 1, MMLU-PRO 1). `geomean` gives each of
+them 0, so they all share rank 4,245, the last place. That tie is part of what separates
+`geomean` from the other rules, but a small part: with those 332 models left out, tau-b
+between `mean` and `geomean` is 0.864 instead of 0.859, and the values against the other
+rules rise by about 0.01.
+
+```
+python examples/table_checks.py open_llm_leaderboard.csv
+```
+
+```
+4576 models, 6 benchmarks
+models with a zero score on at least one benchmark: 332
+  per benchmark: IFEval 7, BBH 0, MATH Lvl 5 134, GPQA 241, MUSR 1, MMLU-PRO 1
+  models with a geometric mean of zero: 332, sharing rank 4245 of 4576
+Kendall tau-b between geomean and other rules: all 4576 models / the 4244 models without a zero score
+  mean       0.859 / 0.864
+  minmax     0.907 / 0.917
+  zscore     0.915 / 0.926
+  mean-rank  0.919 / 0.927
+  copeland   0.899 / 0.907
+```
 
 **Leave benchmarks out.** Dropping one of the six benchmarks changes the first place in 1 of
 6 cases under `mean` and `geomean`, in none under `minmax` and `zscore`, in 2 of 6 under the
@@ -566,6 +592,9 @@ most of it in `kemeny` and `bradley-terry`; the `stability` run with 1000 resamp
 - **The Friedman test needs a complete table**, and the Nemenyi critical value assumes the
   usual infinite degrees of freedom. With thousands of models and a handful of benchmarks
   the critical difference is larger than any difference in the table.
+- **A zero sinks a model under `geomean`.** One zero score gives a geometric mean of zero
+  whatever the other scores are, and all such models tie. On the real table that is 332
+  models, 7 % of the entries.
 - **Missing cells are never imputed.** Each rule handles them as described above, and the
   rules differ in how much a missing benchmark costs a model.
 - **The real-data numbers describe one snapshot** of one leaderboard, in which many entries
