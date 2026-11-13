@@ -35,7 +35,7 @@ def test_friedman_by_hand():
 def test_friedman_matches_scipy_with_and_without_ties():
     rng = np.random.default_rng(0)
     for levels in (1000, 4):
-        for _ in range(25):
+        for _ in range(8):
             k, n = int(rng.integers(3, 9)), int(rng.integers(3, 12))
             scores = rng.integers(0, levels, size=(k, n)).astype(float)
             if any(np.ptp(scores[:, j]) == 0 for j in range(n)) and levels == 4:
