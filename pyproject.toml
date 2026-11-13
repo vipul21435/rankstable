@@ -25,7 +25,8 @@ classifiers = [
 dependencies = ["numpy>=1.22"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.4", "scipy>=1.9"]
+plot = ["matplotlib>=3.5"]
+dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.4", "scipy>=1.9", "matplotlib>=3.5"]
 
 [project.scripts]
 rankstable = "rankstable.cli:main"

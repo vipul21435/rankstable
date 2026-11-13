@@ -1,4 +1,4 @@
-"""Command line interface: ``rank``, ``compare-rules``, ``stability`` and ``agreement``."""
+"""Command line interface: ``rank``, ``compare-rules``, ``stability``, ``agreement``, ``cd``."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 from . import __version__
 from .agreement import benchmark_agreement
+from .friedman import friedman_test
 from .ranking import Ranking, kendall_tau
 from .rules import RULES, aggregate
 from .stability import (
@@ -142,6 +143,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     agreement.add_argument("--seed", type=int, default=0, help="random seed (default 0)")
     agreement.set_defaults(run=_run_agreement)
+
+    cd = commands.add_parser(
+        "cd",
+        parents=[common],
+        help="Friedman test, Nemenyi critical difference and the critical-difference diagram",
+    )
+    cd.add_argument("--alpha", type=float, default=0.05, help="significance level (default 0.05)")
+    cd.add_argument(
+        "--top",
+        type=int,
+        default=None,
+        metavar="N",
+        help="compare only the N models with the best mean rank (default: all models)",
+    )
+    cd.add_argument(
+        "--plot", default=None, metavar="FILE", help="write the diagram here (needs matplotlib)"
+    )
+    cd.add_argument("--title", default=None, help="title of the diagram")
+    cd.set_defaults(run=_run_cd)
     return parser
 
 
@@ -574,6 +594,67 @@ def _run_agreement(args: argparse.Namespace) -> str:
     return "\n".join(lines)
 
 
+def _run_cd(args: argparse.Namespace) -> str:
+    table = _load(args)
+    if args.top is not None:
+        if args.top < 2:
+            raise ValueError("--top must be at least 2")
+        table = table.select(models=aggregate(table, "mean-rank").order()[: args.top])
+    result = friedman_test(table, alpha=args.alpha)
+    k, n = table.n_models, table.n_benchmarks
+    order = sorted(range(k), key=lambda i: (result.mean_ranks[i], result.models[i]))
+    groups = result.groups()
+    if args.plot:
+        from .plot import plot_critical_difference
+
+        plot_critical_difference(result, args.plot, title=args.title)
+    if args.format == "json":
+        payload = {
+            "command": "cd",
+            **_shape(table),
+            "alpha": result.alpha,
+            "chi2": _json_number(result.chi2),
+            "chi2_df": k - 1,
+            "chi2_p": _json_number(result.chi2_p),
+            "f": None if math.isnan(result.f) or math.isinf(result.f) else result.f,
+            "f_df": [k - 1, (k - 1) * (n - 1)],
+            "f_p": _json_number(result.f_p),
+            "critical_difference": result.critical_difference,
+            "mean_ranks": [
+                {"model": result.models[i], "mean_rank": float(result.mean_ranks[i])} for i in order
+            ],
+            "groups": [list(group) for group in groups],
+            "plot": args.plot,
+        }
+        return json.dumps(payload, indent=2)
+    lines = [
+        f"{_shape_sentence(table)}.",
+        "",
+        f"Friedman test: chi-square = {_fixed(result.chi2, 3)} on {k - 1} degrees of freedom, "
+        f"p = {_p_value(result.chi2_p)}. Iman-Davenport F = {_fixed(result.f, 3)} on {k - 1} and "
+        f"{(k - 1) * (n - 1)} degrees of freedom, p = {_p_value(result.f_p)}.",
+        f"Nemenyi critical difference at alpha = {result.alpha:g}: "
+        f"{_fixed(result.critical_difference, 3)} mean ranks.",
+        "",
+        markdown_table(
+            ["model", "mean rank"],
+            [[_cell(result.models[i]), _fixed(float(result.mean_ranks[i]), 3)] for i in order],
+            "lr",
+        ),
+        "",
+        "Groups of models whose mean ranks differ by less than the critical difference:",
+        "",
+    ]
+    lines += [f"- {', '.join(_cell(model) for model in group)}" for group in groups] or ["- none"]
+    if args.plot:
+        lines += ["", f"Diagram written to {args.plot}."]
+    return "\n".join(lines)
+
+
+def _p_value(p: float) -> str:
+    return "n/a" if math.isnan(p) else f"{p:.4g}"
+
+
 def format_column(values: Sequence[float | None], digits: int = 4) -> list[str]:
     """Format one column of numbers with a shared number of decimals.
 
@@ -588,6 +669,8 @@ def format_column(values: Sequence[float | None], digits: int = 4) -> list[str]:
 def _fixed(value: float | None, digits: int) -> str:
     if _is_missing(value):
         return "n/a"
+    if math.isinf(value):
+        return "inf" if value > 0 else "-inf"
     text = f"{value:.{digits}f}"
     return text[1:] if text.startswith("-") and float(text) == 0 else text
 

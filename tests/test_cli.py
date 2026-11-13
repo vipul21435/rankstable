@@ -107,6 +107,8 @@ def test_compare_rules_json_covers_every_rule(capsys):
         "win-rate",
         "borda",
         "copeland",
+        "kemeny",
+        "bradley-terry",
     ]
     assert payload["skipped"] == {}
     tau = payload["kendall_tau"]
@@ -427,3 +429,82 @@ def test_agreement_json_and_errors(tmp_path, capsys):
     assert "| x | n/a | n/a to n/a | 3 |" in out
     code, out, _ = run(capsys, "agreement", flat, "--resamples", 5, "--format", "json")
     assert json.loads(out)["benchmarks"][-1]["tau"] is None
+
+
+# Mean ranks 1.25, 1.75, 3 over four benchmarks; the numbers are worked out in test_friedman.py.
+RANKED = "model,b1,b2,b3,b4\nx,9,9,9,5\ny,5,5,5,9\nz,1,1,1,1\n"
+
+
+def test_cd_markdown_by_hand(tmp_path, capsys):
+    path = write(tmp_path, "ranked.csv", RANKED)
+    code, out, err = run(capsys, "cd", path)
+    assert (code, err) == (0, "")
+    assert out.splitlines() == [
+        "3 models, 4 benchmarks, 0 missing cells.",
+        "",
+        "Friedman test: chi-square = 6.500 on 2 degrees of freedom, p = 0.03877. "
+        "Iman-Davenport F = 13.000 on 2 and 6 degrees of freedom, p = 0.006592.",
+        "Nemenyi critical difference at alpha = 0.05: 1.657 mean ranks.",
+        "",
+        "| model | mean rank |",
+        "|---|---:|",
+        "| x | 1.250 |",
+        "| y | 1.750 |",
+        "| z | 3.000 |",
+        "",
+        "Groups of models whose mean ranks differ by less than the critical difference:",
+        "",
+        "- x, y",
+        "- y, z",
+    ]
+
+
+def test_cd_json_top_and_plot(tmp_path, capsys):
+    path = write(tmp_path, "ranked.csv", RANKED)
+    picture = tmp_path / "cd.png"
+    code, out, _ = run(
+        capsys,
+        "cd",
+        path,
+        "--top",
+        2,
+        "--alpha",
+        0.1,
+        "--format",
+        "json",
+        "--plot",
+        picture,
+        "--title",
+        "two models",
+    )
+    assert code == 0
+    payload = json.loads(out)
+    assert (payload["n_models"], payload["alpha"], payload["chi2_df"]) == (2, 0.1, 1)
+    assert payload["f_df"] == [1, 3]
+    assert [row["model"] for row in payload["mean_ranks"]] == ["x", "y"]
+    # x is ahead on three benchmarks of four: mean ranks 1.25 and 1.75, chi2 = 4 * 0.25 = 1
+    assert payload["chi2"] == pytest.approx(1)
+    # q_0.10 for two models is 1.645: CD = 1.645 * sqrt(2 * 3 / 24)
+    assert payload["critical_difference"] == pytest.approx(1.645 * 0.5, abs=1e-3)
+    assert payload["groups"] == [["x", "y"]]
+    assert payload["plot"] == str(picture)
+    assert picture.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    code, out, _ = run(capsys, "cd", path, "--plot", picture)
+    assert out.splitlines()[-1] == f"Diagram written to {picture}."
+
+
+def test_cd_errors_and_perfect_agreement(tmp_path, capsys):
+    holes = write(tmp_path, "holes.csv", HOLES)
+    code, _, err = run(capsys, "cd", holes)
+    assert code == 2
+    assert "needs a complete table" in err
+    code, out, _ = run(capsys, "cd", holes, "--missing", "drop-benchmarks")
+    assert code == 2 or "1 benchmark" in out
+    path = write(tmp_path, "ranked.csv", RANKED)
+    code, _, err = run(capsys, "cd", path, "--top", 1)
+    assert (code, err) == (2, "rankstable: error: --top must be at least 2\n")
+    same = write(tmp_path, "same.csv", "model,b1,b2,b3\nx,3,3,3\ny,2,2,2\nz,1,1,1\n")
+    code, out, _ = run(capsys, "cd", same)
+    assert "Iman-Davenport F = inf on 2 and 4 degrees of freedom, p = 0." in out
+    code, out, _ = run(capsys, "cd", same, "--format", "json")
+    assert json.loads(out)["f"] is None
