@@ -82,6 +82,14 @@ def test_compare_rules_markdown(capsys):
         "| mean | 1.000 | 0.467 | 0.467 |",
         "| mean-rank | 0.467 | 1.000 | 1.000 |",
         "| borda | 0.467 | 1.000 | 1.000 |",
+        "",
+        "Share of the top 2 in common:",
+        "",
+        "| rule | mean | mean-rank | borda |",
+        "|---|---:|---:|---:|",
+        "| mean | 1.000 | 0.500 | 0.500 |",
+        "| mean-rank | 0.500 | 1.000 | 1.000 |",
+        "| borda | 0.500 | 1.000 | 1.000 |",
     ]
 
 
@@ -109,6 +117,10 @@ def test_compare_rules_json_covers_every_rule(capsys):
     # Moving atlas from first to fifth swaps four of the fifteen pairs: (11 - 4) / 15.
     assert tau["mean"]["mean-rank"] == pytest.approx(7 / 15)
     assert [row["model"] for row in payload["rankings"]["mean"]][:2] == ["atlas", "birch"]
+    # top three by mean: atlas, birch, cedar; by mean rank: birch, cedar, dune
+    assert payload["top"] == 3
+    assert payload["top_k_overlap"]["mean"]["mean-rank"] == pytest.approx(2 / 3)
+    assert payload["top_k_overlap"]["borda"]["borda"] == 1
 
 
 def test_compare_rules_skips_a_rule_that_cannot_use_the_scores(tmp_path, capsys):
@@ -250,3 +262,168 @@ def test_markdown_table_escapes_nothing_itself_but_cells_are_escaped(tmp_path, c
     path = write(tmp_path, "pipes.csv", "model,x\nleft|right,1\n")
     _, out, _ = run(capsys, "rank", path)
     assert out.splitlines()[4] == "| 1 | left\\|right | 1 |"
+
+
+# Means: A 17/3, B 5, C 3; the leave-one-out outcomes are worked out in test_stability.py.
+SMALL = "model,b1,b2,b3\nA,9,2,6\nB,5,6,4\nC,1,5,3\n"
+
+
+def test_stability_markdown_by_hand(tmp_path, capsys):
+    path = write(tmp_path, "small.csv", SMALL)
+    code, out, err = run(
+        capsys, "stability", path, "--rules", "mean", "--top", 2, "--resamples", 0, "--removals", 0
+    )
+    assert (code, err) == (0, "")
+    lines = out.splitlines()
+    assert lines[0] == "3 models, 3 benchmarks, 0 missing cells."
+    # b1 against b2: tau -1/3, b1 against b3: 1, b2 against b3: -1/3 -> distances 2/3, 0, 2/3
+    assert lines[2].endswith("0 = same order, 1 = reversed): 0.444")
+    assert lines[4] == "Leave 1 of 3 benchmarks out (all 3 subsets):"
+    assert (
+        lines[6]
+        == "| rule | first on the full table | first changes | top 2 changes | mean tau | min tau |"
+    )
+    assert lines[8] == "| mean | A | 66.7 % | 33.3 % | 0.605 | 0.000 |"
+    assert len(lines) == 9
+
+
+def test_stability_reports_bootstrap_and_removals(tmp_path, capsys):
+    # Three benchmarks say A > B > C and two say B > C > A: removing C flips the Borda order.
+    path = write(tmp_path, "split.csv", "model,v,w,x,y,z\nA,3,3,3,1,1\nB,2,2,2,3,3\nC,1,1,1,2,2\n")
+    code, out, _ = run(
+        capsys, "stability", path, "--rules", "mean,borda", "--leave-out", "1,2", "--resamples", 20
+    )
+    assert code == 0
+    lines = out.splitlines()
+    assert "Leave 1 of 5 benchmarks out (all 5 subsets):" in lines
+    assert "Leave 2 of 5 benchmarks out (all 10 subsets):" in lines
+    assert "Bootstrap over benchmarks (20 resamples, seed 0):" in lines
+    assert "Remove one model at a time (every model, 3 removals):" in lines
+    assert lines[-2] == "| mean | 0.0 % | 0.0 % | 0.0 % | none |"
+    assert lines[-1] == "| borda | 33.3 % | 33.3 % | 33.3 % | C (100.0 % of pairs) |"
+
+
+def test_stability_json(tmp_path, capsys):
+    path = write(tmp_path, "small.csv", SMALL)
+    code, out, _ = run(
+        capsys,
+        "stability",
+        path,
+        "--rules",
+        "mean,geomean",
+        "--top",
+        2,
+        "--resamples",
+        30,
+        "--format",
+        "json",
+        "--seed",
+        5,
+    )
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["command"] == "stability"
+    assert (payload["top"], payload["seed"], payload["rules"]) == (2, 5, ["mean", "geomean"])
+    assert payload["diversity"] == pytest.approx(4 / 9)
+    first = payload["leave_out"][0]
+    assert (first["k"], first["rule"], first["n_subsets"], first["exhaustive"]) == (
+        1,
+        "mean",
+        3,
+        True,
+    )
+    assert first["first"] == ["A"]
+    assert first["first_changed"] == pytest.approx(2 / 3)
+    assert first["top_changed"] == pytest.approx(1 / 3)
+    assert [s["dropped"] for s in first["subsets"]] == [["b1"], ["b2"], ["b3"]]
+    assert [s["first"] for s in first["subsets"]] == [["B"], ["A"], ["A", "B"]]
+    boot = payload["bootstrap"][0]
+    assert (boot["rule"], boot["n_resamples"], boot["confidence"]) == ("mean", 30, 0.95)
+    assert [m["model"] for m in boot["models"]] == ["A", "B", "C"]
+    assert all(0 <= m["p_first"] <= m["p_top"] <= 1 for m in boot["models"])
+    removal = payload["remove_models"][0]
+    assert (removal["rule"], removal["n_removals"], removal["order_changed"]) == ("mean", 3, 0)
+    assert removal["largest_effect"] == {"model": "A", "pairs_changed": 0}
+
+
+def test_stability_skips_rules_and_checks_options(tmp_path, capsys):
+    path = write(tmp_path, "signed.csv", "model,x,y,z\na,1,-2,3\nb,2,3,1\nc,3,1,2\n")
+    code, out, _ = run(capsys, "stability", path, "--rules", "mean,geomean", "--resamples", 0)
+    assert code == 0
+    assert "| geomean |" not in out
+    assert out.splitlines()[-1].startswith("Skipped geomean: the geometric mean needs")
+    for options, message in [
+        (["--leave-out", "3"], "cannot leave 3 of 3 benchmark(s) out"),
+        (["--leave-out", "one"], "--leave-out takes whole numbers"),
+        (["--leave-out", ","], "--leave-out needs at least one number"),
+        (["--top", "0"], "--top must be at least 1"),
+        (["--resamples", "-1"], "cannot be negative"),
+        (["--rules", "median"], "unknown rule(s): median"),
+    ]:
+        code, _, err = run(capsys, "stability", path, *options)
+        assert code == 2, options
+        assert message in err, options
+
+
+def test_stability_skips_the_removal_check_for_two_models(tmp_path, capsys):
+    path = write(tmp_path, "pair.csv", "model,x,y\na,1,2\nb,2,1\n")
+    code, out, _ = run(capsys, "stability", path, "--rules", "mean", "--resamples", 5)
+    assert code == 0
+    assert "Remove one model" not in out
+
+
+AGREE = "model,b1,b2,b3,b4\nm1,4,8,40,1\nm2,3,6,30,2\nm3,2,4,20,3\nm4,1,2,10,4\n"
+
+
+def test_agreement_markdown_lists_the_least_agreeing_benchmark_first(tmp_path, capsys):
+    path = write(tmp_path, "agree.csv", AGREE)
+    code, out, err = run(capsys, "agreement", path, "--resamples", 40)
+    assert (code, err) == (0, "")
+    lines = out.splitlines()
+    assert lines[2] == (
+        "Kendall tau-b of each benchmark with the win-rate ranking of the other benchmarks, "
+        "lowest first (95 % bootstrap interval over models, 40 resamples, seed 0):"
+    )
+    assert lines[4:] == [
+        "| benchmark | tau | 95 % interval | models |",
+        "|---|---:|---:|---:|",
+        "| b4 | -1.000 | -1.000 to -1.000 | 4 |",
+        "| b1 | 1.000 | 1.000 to 1.000 | 4 |",
+        "| b2 | 1.000 | 1.000 to 1.000 | 4 |",
+        "| b3 | 1.000 | 1.000 to 1.000 | 4 |",
+    ]
+
+
+def test_agreement_json_and_errors(tmp_path, capsys):
+    path = write(tmp_path, "agree.csv", AGREE)
+    code, out, _ = run(
+        capsys,
+        "agreement",
+        path,
+        "--rule",
+        "zscore",
+        "--resamples",
+        10,
+        "--confidence",
+        0.9,
+        "--format",
+        "json",
+    )
+    assert code == 0
+    payload = json.loads(out)
+    assert (payload["rule"], payload["n_resamples"], payload["confidence"]) == ("zscore", 10, 0.9)
+    assert payload["benchmarks"][0] == {
+        "benchmark": "b4",
+        "n_models": 4,
+        "tau": -1.0,
+        "low": -1.0,
+        "high": -1.0,
+    }
+    single = write(tmp_path, "single.csv", "model,x\na,1\nb,2\n")
+    code, _, err = run(capsys, "agreement", single)
+    assert (code, err) == (2, "rankstable: error: agreement needs at least two benchmarks\n")
+    flat = write(tmp_path, "flat.csv", "model,x,y\na,1,5\nb,2,5\nc,3,5\n")
+    code, out, _ = run(capsys, "agreement", flat, "--resamples", 5)
+    assert "| x | n/a | n/a to n/a | 3 |" in out
+    code, out, _ = run(capsys, "agreement", flat, "--resamples", 5, "--format", "json")
+    assert json.loads(out)["benchmarks"][-1]["tau"] is None
