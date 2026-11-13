@@ -119,6 +119,11 @@ def test_long_jsonl_rejects_malformed_input(lines, message):
         parse_long_jsonl(lines)
 
 
+def test_long_jsonl_skips_blank_lines():
+    table = parse_long_jsonl('\n{"model": "a", "benchmark": "x", "score": 1}\n\n')
+    assert (table.models, table.benchmarks, table.scores.tolist()) == (("a",), ("x",), [[1.0]])
+
+
 def test_read_table_picks_the_format_from_the_suffix(tmp_path):
     wide = tmp_path / "scores.csv"
     wide.write_text("﻿" + WIDE, encoding="utf-8")
