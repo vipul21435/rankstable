@@ -371,8 +371,11 @@ Iman-Davenport statistic `F = (N - 1) chi2 / (N (k - 1) - chi2)` has `k - 1` and
 `(k - 1)(N - 1)` degrees of freedom. Two models differ significantly by the Nemenyi test when
 their mean ranks differ by at least `CD = q_alpha * sqrt(k (k + 1) / (6 N))`. `q_alpha` is
 computed for any `k` as the upper `alpha` point of the range of `k` standard normal
-variables divided by `sqrt(2)`, by numerical integration; it reproduces Table 5(a) of Demsar
-(2006) to the three decimals printed there. In the diagram the axis is turned as in that
+variables divided by `sqrt(2)`, by numerical integration. It agrees with scipy's Studentized
+range distribution to within 1e-11 and is within 0.001 of every entry of Table 5(a) of Demsar
+(2006); three of the 18 entries differ in the third decimal (2.3437 here against 2.343
+printed for `k = 3`, 2.9483 against 2.949 for `k = 7`, and 2.4595 against 2.459 for `k = 5`
+at `alpha = 0.10`). In the diagram the axis is turned as in that
 paper, "so that the lowest (best) ranks are to the right", and a bar joins models that the
 test does not separate. The p-values use this package's own incomplete gamma and beta
 functions and are tested against scipy.

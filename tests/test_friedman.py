@@ -56,18 +56,26 @@ def test_tail_probabilities_match_scipy():
     assert math.isnan(f_sf(math.nan, 2, 6))
 
 
-def test_nemenyi_critical_values_match_the_published_table_and_scipy():
+def test_nemenyi_critical_values_match_scipy_and_the_published_table():
     # Demsar (2006), Table 5(a), which gives three decimals
     published = {
         0.05: [1.960, 2.343, 2.569, 2.728, 2.850, 2.949, 3.031, 3.102, 3.164],
         0.10: [1.645, 2.052, 2.291, 2.459, 2.589, 2.693, 2.780, 2.855, 2.920],
     }
+    third_decimal_differs = set()
     for alpha, values in published.items():
         for k, value in zip(range(2, 11), values, strict=True):
-            assert nemenyi_q(k, alpha) == pytest.approx(value, abs=1.5e-3)
-    for k in (3, 20):
-        expected = stats.studentized_range.ppf(0.95, k, 1e6) / math.sqrt(2)
-        assert nemenyi_q(k, 0.05) == pytest.approx(expected, rel=1e-4)
+            ours = nemenyi_q(k, alpha)
+            reference = stats.studentized_range.ppf(1 - alpha, k, np.inf) / math.sqrt(2)
+            assert ours == pytest.approx(reference, abs=1e-10)
+            assert ours == pytest.approx(value, abs=1e-3)
+            if f"{ours:.3f}" != f"{value:.3f}":
+                third_decimal_differs.add((alpha, k))
+    # 2.3437, 2.9483 and 2.4595 are printed as 2.343, 2.949 and 2.459
+    assert third_decimal_differs == {(0.05, 3), (0.05, 7), (0.10, 5)}
+    for k in (20, 100, 1000):
+        reference = stats.studentized_range.ppf(0.95, k, np.inf) / math.sqrt(2)
+        assert nemenyi_q(k, 0.05) == pytest.approx(reference, abs=1e-10)
     assert range_cdf(0, 3) == 0
     assert range_cdf(25, 3) == pytest.approx(1)
     with pytest.raises(ValueError, match="at least two models"):
