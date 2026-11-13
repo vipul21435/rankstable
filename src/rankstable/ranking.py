@@ -70,7 +70,10 @@ def kendall_tau(a: Sequence[float] | np.ndarray, b: Sequence[float] | np.ndarray
     ``tau_b = (C - D) / sqrt((n0 - n1) * (n0 - n2))`` with ``C`` concordant and ``D``
     discordant pairs, ``n0 = n(n-1)/2`` pairs in all, and ``n1``, ``n2`` the pairs tied in the
     first and in the second sequence. It is 1 for the same order, -1 for the reverse order and
-    ``nan`` when either sequence is constant or shorter than two. Runs in O(n^2) time.
+    ``nan`` when either sequence is constant or shorter than two.
+
+    The pairs are counted by sorting on the first sequence and counting inversions of the
+    second with a merge sort, so the cost is O(n log^2 n) rather than O(n^2).
     """
     x = np.asarray(a, dtype=float)
     y = np.asarray(b, dtype=float)
@@ -79,18 +82,52 @@ def kendall_tau(a: Sequence[float] | np.ndarray, b: Sequence[float] | np.ndarray
     if np.isnan(x).any() or np.isnan(y).any():
         raise ValueError("kendall_tau does not accept nan")
     n = x.size
-    balance = 0
-    tied_x = 0
-    tied_y = 0
-    for i in range(n - 1):
-        dx = np.sign(x[i + 1 :] - x[i])
-        dy = np.sign(y[i + 1 :] - y[i])
-        balance += int(np.dot(dx, dy))
-        tied_x += int(np.count_nonzero(dx == 0))
-        tied_y += int(np.count_nonzero(dy == 0))
+    if n < 2:
+        return math.nan
+    order = np.lexsort((y, x))
+    x = x[order]
+    y = y[order]
     pairs = n * (n - 1) // 2
+    tied_x = _tied_pairs(np.diff(x) != 0)
+    tied_both = _tied_pairs((np.diff(x) != 0) | (np.diff(y) != 0))
+    tied_y = _tied_pairs(np.diff(np.sort(y)) != 0)
+    # Within equal x the y are ascending, so an inversion of y is a discordant pair.
+    discordant = _inversions(y)
+    concordant = pairs - tied_x - tied_y + tied_both - discordant
     scale = math.sqrt((pairs - tied_x) * (pairs - tied_y))
-    return balance / scale if scale > 0 else math.nan
+    return (concordant - discordant) / scale if scale > 0 else math.nan
+
+
+def _tied_pairs(changes: np.ndarray) -> int:
+    """Pairs inside runs of equal neighbours; ``changes[i]`` says element i+1 starts a run."""
+    edges = np.flatnonzero(np.concatenate(([True], changes, [True])))
+    runs = np.diff(edges)
+    return int((runs * (runs - 1) // 2).sum())
+
+
+def _inversions(values: np.ndarray) -> int:
+    """Number of pairs ``i < j`` with ``values[i] > values[j]``, by bottom-up merge sort.
+
+    Each pass merges neighbouring sorted runs of length ``width`` with one stable sort. An
+    element of a right-hand run that lands at position ``p`` of its merged block, having been
+    at position ``width + q`` before, has ``p - q`` left-hand elements at or below it; the
+    other ``width - (p - q)`` left-hand elements are larger and each forms one inversion.
+    """
+    n = values.size
+    index = np.arange(n)
+    sequence = values
+    total = 0
+    width = 1
+    while width < n:
+        block = index // (2 * width)
+        order = np.lexsort((sequence, block))
+        offset = order % (2 * width)
+        from_right = offset >= width
+        landed = index[from_right] % (2 * width)
+        total += int((offset[from_right] - landed).sum())
+        sequence = sequence[order]
+        width *= 2
+    return total
 
 
 @dataclass(frozen=True, eq=False)
